@@ -1,0 +1,6 @@
+interface:
+  display_name: "SSH Key Provision"
+  short_description: "Configure Linux SSH key login from a password login."
+  default_prompt: "Use $ssh-key-provision to configure SSH key login for a Linux server; ask me for host, port, username, and password if needed."
+policy:
+  allow_implicit_invocation: true
