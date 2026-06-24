@@ -1,11 +1,11 @@
 ---
 name: ssh-key-provision
-description: Configure SSH public-key login and Codex CLI for Linux servers from Windows/Codex Desktop. Use when the user wants Codex to ask for an SSH hostname or IP, port, username, and password, then log in once with the password, install a local public key into ~/.ssh/authorized_keys, verify key-based SSH, install Codex CLI from bundled offline Linux x64 or ARM64/aarch64 packages, fix Codex Desktop path-probe timeouts caused by non-TTY login shell startup files, and report the private key path to use in Codex Desktop or other SSH clients.
+description: Configure and repair SSH public-key login and Codex CLI for Linux servers from Windows/Codex Desktop. Use when the user wants Codex to ask for an SSH hostname or IP, port, username, and password, then log in once with the password, install a local public key into ~/.ssh/authorized_keys, verify key-based SSH, install Codex CLI from bundled offline Linux x64 or ARM64/aarch64 packages, fix Codex Desktop path-probe timeouts caused by non-TTY login shell startup files, repair stale remote app-server processes, sync local Codex API-key auth to the remote host, pin unstable codexzh DNS backends, diagnose 401 invalid token and stream disconnected errors for https://api.codexzh.com/v1/responses, and report the private key path to use in Codex Desktop or other SSH clients.
 ---
 
 # SSH Key Provision
 
-Use this skill to turn a working password-based SSH login into key-based SSH login for a Linux host, install Codex CLI offline, and verify the connection shape Codex Desktop uses.
+Use this skill to turn a working password-based SSH login into key-based SSH login for a Linux host, install Codex CLI offline, and verify or repair the connection shape Codex Desktop uses.
 
 ## Required inputs
 
@@ -43,6 +43,24 @@ The script:
 7. Verifies Codex Desktop's path probe shape: `$SHELL -l -i -c 'command -v codex ...'`.
 8. If that path probe times out, applies a minimal non-TTY login-shell fix and verifies again.
 
+## Post-provision repair workflow
+
+When key-based SSH already works but Codex Desktop or the remote Codex CLI still fails, run `scripts/repair-codex-desktop-connection.ps1` from PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+& '<skill-dir>\scripts\repair-codex-desktop-connection.ps1' -HostName '<host>' -Port 22 -User '<user>' -PrivateKeyPath '<private-key>'
+```
+
+This script is intentionally separate from the install script so it can repair a live host without reinstalling Codex CLI. It:
+
+1. Verifies key-based SSH and `codex --version`.
+2. Applies the same Codex Desktop non-TTY path-probe fix used by the installer.
+3. Optionally copies the local Codex `auth.json` to the remote `~/.codex/auth.json`.
+4. Optionally pins `api.codexzh.com` in `/etc/hosts` to a known working IP when DNS returns an unstable backend.
+5. Stops stale `codex app-server`, `codex app-server proxy`, desktop websocket, and stuck probe processes so Codex Desktop reloads the fixed auth/config.
+6. Runs the Codex Desktop path probe, `codex doctor`, and a small `codex exec` request.
+
 ## Bundled packages
 
 The skill expects these offline packages in `assets/codex-install/`:
@@ -75,6 +93,16 @@ timeout 8 "$SHELL" -l -i -c 'command -v codex && codex --version'
 
 When needed, it adds guarded blocks to `/etc/profile` and `~/.bashrc` that only activate for interactive shells without a real TTY. The blocks set a PATH containing Codex and return early so Codex Desktop's path probe can finish. The script backs up files before patching.
 
+## Codex API/auth and stream errors
+
+If the remote CLI can run `codex --version` but model requests fail, separate the failure class:
+
+- `unexpected status 401 Unauthorized: 无效的令牌` means the remote app-server or CLI is using a stale/wrong API key. Sync the known-good local `~/.codex/auth.json` or `C:\Users\<user>\.codex\auth.json` to the remote `~/.codex/auth.json`, then restart remote app-server processes.
+- `stream disconnected before completion: error sending request for url (https://api.codexzh.com/v1/responses)` can be caused by a bad DNS backend for `api.codexzh.com`. Test with `codex doctor` and a small `codex exec`; if pinning is needed, use `repair-codex-desktop-connection.ps1 -PinCodexzhIp 64.186.239.124`.
+- `app-server control socket is already in use` usually means an old remote app-server is still running. Stop stale app-server/proxy processes and remove the old control socket before asking the user to toggle the Desktop SSH connection.
+
+Do not print API keys. Fingerprints such as SHA-256 prefixes and key lengths are acceptable for comparison.
+
 ## Final response
 
 Report:
@@ -82,6 +110,10 @@ Report:
 - Whether key-based login verification succeeded.
 - Whether remote Codex CLI installation and `codex --version` succeeded.
 - Whether Codex Desktop path-probe verification succeeded.
+- Whether Codex auth sync was performed and whether remote API-key fingerprint matches local auth.
+- Whether codexzh DNS pinning was applied.
+- Whether stale app-server processes were stopped.
+- Whether `codex doctor` reachability and a small `codex exec` request succeeded.
 - The private key path for Codex Desktop's identity file field.
 - The host, port, and user values to use.
 
