@@ -1,6 +1,6 @@
 ---
 name: ssh-key-provision
-description: Configure and repair SSH public-key login and Codex CLI for Linux servers from Windows/Codex Desktop. Use when the user wants Codex to ask for an SSH hostname or IP, port, username, and password, then log in once with the password, install a local public key into ~/.ssh/authorized_keys, verify key-based SSH, install Codex CLI from bundled offline Linux x64 or ARM64/aarch64 packages, fix Codex Desktop path-probe timeouts caused by non-TTY login shell startup files, repair stale remote app-server processes, sync local Codex API-key auth to the remote host, pin unstable codexzh DNS backends, diagnose 401 invalid token and stream disconnected errors for https://api.codexzh.com/v1/responses, and report the private key path to use in Codex Desktop or other SSH clients.
+description: Configure and repair SSH public-key login, Codex CLI, and VS Code Remote-SSH prerequisites for Linux servers from Windows/Codex Desktop. Use when the user wants Codex to ask for SSH host, port, username, and password, then install a local public key into ~/.ssh/authorized_keys, verify key-based SSH, install Codex CLI from bundled offline Linux x64 or ARM64/aarch64 packages, fix Codex Desktop path-probe timeouts caused by non-TTY login shell startup files, repair stale remote app-server processes, sync local Codex API-key auth to the remote host, pin unstable codexzh DNS backends, diagnose 401 invalid token and stream disconnected errors for https://api.codexzh.com/v1/responses, repair VS Code Remote-SSH exitCode==207/LinuxPrereqs failures on embedded Linux or Synology DSM caused by missing or nonstandard ldd, and report the private key path to use in Codex Desktop or other SSH clients.
 ---
 
 # SSH Key Provision
@@ -60,6 +60,38 @@ This script is intentionally separate from the install script so it can repair a
 4. Optionally pins `api.codexzh.com` in `/etc/hosts` to a known working IP when DNS returns an unstable backend.
 5. Stops stale `codex app-server`, `codex app-server proxy`, desktop websocket, and stuck probe processes so Codex Desktop reloads the fixed auth/config.
 6. Runs the Codex Desktop path probe, `codex doctor`, and a small `codex exec` request.
+
+## VS Code Remote-SSH prerequisites on DSM or embedded Linux
+
+When VS Code Remote-SSH fails with `exitCode==207`, `LinuxPrereqs`, or "This machine does not meet Visual Studio Code Server's prerequisites", first verify SSH itself works:
+
+```powershell
+ssh -o BatchMode=yes <host> 'uname -a; command -v ldd; ldd --version'
+```
+
+On Synology DSM 7.x, glibc and libstdc++ can be new enough while `/usr/bin/ldd` is missing or has nonstandard output. VS Code's prereq detector may reject the host unless `ldd --version` begins with a GNU-like line such as:
+
+```text
+ldd (GNU libc) 2.36
+```
+
+Use `scripts/repair-vscode-remote-ssh-prereqs.ps1` to install a minimal `/usr/bin/ldd` wrapper on glibc x86_64 systems. The wrapper calls the existing system loader `/lib/ld-linux-x86-64.so.2 --list`; it does not replace glibc, libstdc++, or DSM system libraries.
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+$sec = ConvertTo-SecureString '<runtime password>' -AsPlainText -Force
+& '<skill-dir>\scripts\repair-vscode-remote-ssh-prereqs.ps1' -HostName '<host>' -Port 1995 -User '<user>' -Password $sec -CleanupVscodeServer
+```
+
+After repair, verify:
+
+```sh
+command -v ldd
+ldd --version
+ldd /bin/sh
+```
+
+If VS Code still fails after `ldd` is fixed, compare the host against the official Remote-SSH Linux prerequisites. Modern VS Code versions may require kernel `>= 4.18`, `glibc >= 2.28`, `libstdc++ >= 3.4.25`, `tar`, `bash`, `curl` or `wget`, and in newer releases `binutils >= 2.29`. DSM may report an older kernel such as `4.4.302+`; in that case prefer connecting to a supported Ubuntu/Debian container or use an older VS Code release rather than replacing DSM system libraries.
 
 ## Bundled packages
 
